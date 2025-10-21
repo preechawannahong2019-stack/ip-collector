@@ -1,20 +1,19 @@
-// index.js
 const express = require('express');
 const { google } = require('googleapis');
-const app = express();
 
+const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ตั้งค่า Google Sheet
-const SHEET_ID = process.env.SHEET_ID;
-const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
+const SHEET_ID = process.env.SHEET_ID;              // ต้องมีค่า
+const TZ = 'Asia/Bangkok';
+
+// เตรียม client สำหรับ Google Sheets โดยใช้ Service Account ของ Cloud Run อัตโนมัติ (ADC)
 const auth = new google.auth.GoogleAuth({
-  scopes: SCOPES,
+  scopes: ['https://www.googleapis.com/auth/spreadsheets']
 });
 const sheets = google.sheets({ version: 'v4', auth });
 
-// ดึง IP ของผู้เข้าใช้งาน
 function clientIp(req) {
   const h = req.headers;
   return (
@@ -24,34 +23,33 @@ function clientIp(req) {
   );
 }
 
-// จุดรับ POST ข้อมูล
 app.post('/collector', async (req, res) => {
   try {
+    if (!SHEET_ID) throw new Error('SHEET_ID env is missing');
+
     const ip = clientIp(req);
-    const ua = req.headers['user-agent'];
+    const ua = req.headers['user-agent'] || '';
     const ref = req.headers['referer'] || '';
-    const payload = JSON.stringify(req.body);
-    const timestamp = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+    const payload = JSON.stringify(req.body ?? {});
+    const timestamp = new Date().toLocaleString('th-TH', { timeZone: TZ });
 
     await sheets.spreadsheets.values.append({
       spreadsheetId: SHEET_ID,
       range: 'Sheet1!A:E',
-      valueInputOption: 'RAW',
-      requestBody: {
-        values: [[timestamp, ip, ua, ref, payload]],
-      },
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [[timestamp, ip, ua, ref, payload]] }
     });
 
     res.status(204).end();
   } catch (err) {
-    console.error('Error writing to sheet:', err);
-    res.status(500).send('Error');
+    console.error('Error writing to sheet:', err?.message || err);
+    res.status(500).send('error');
   }
 });
 
-app.get('/', (req, res) => {
-  res.send('✅ IP Collector connected to Google Sheet');
-});
+app.get('/', (req, res) =>
+  res.send('IP Collector is running (Google Sheet linked)')
+);
 
 const port = process.env.PORT || 8080;
-app.listen(port, () => console.log('Listening on port', port));
+app.listen(port, () => console.log('Listening on', port));
