@@ -14,9 +14,16 @@ const sheets = google.sheets({ version: "v4", auth });
 
 let currentTopic = "โหวตเรื่องใหม่กำลังรอแอดมินตั้งค่า";
 
-app.get("/poll", (req, res) => {
-  res.json({ topic: currentTopic });
+app.get('/', (req, res) => {
+  res
+    .status(200)
+    .type('text/html; charset=utf-8')
+    .send(`
+      <h3>IP Collector is running ✅</h3>
+      <p>Try <a href="/poll">/poll</a> to see current vote.</p>
+    `);
 });
+
 
 // แอดมินเปลี่ยนหัวข้อโหวต (มีรหัส)
 app.post("/topic", (req, res) => {
