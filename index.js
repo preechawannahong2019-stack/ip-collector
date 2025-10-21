@@ -79,20 +79,37 @@ app.get('/poll', async (req, res) => {
 });
 
 // ตั้ง/เปลี่ยนหัวข้อ (เฉพาะแอดมิน)
-app.post('/topic', async (req, res) => {
+app.post('/vote', async (req, res) => {
   try {
-    const { topic, pin } = req.body || {};
-    if (pin !== ADMIN_PIN) return res.status(403).json({ ok: false, error: 'invalid pin' });
-    const title = String(topic || '').trim();
-    if (!title) return res.status(400).json({ ok: false, error: 'missing topic' });
+    const { user } = req.body || {};
+    // รองรับทั้ง choice และ vote
+    const vRaw = (req.body?.choice ?? req.body?.vote ?? '').toString().toLowerCase();
+    if (vRaw !== 'yes' && vRaw !== 'no') {
+      return res.status(400).json({ ok: false, error: 'missing/invalid choice|vote', body: req.body });
+    }
 
-    await setCurrentTopic(title);
-    const { yes, no } = await countVotes(title);
-    res.json({ ok: true, topic: title, yes, no });
+    const topic = await getCurrentTopic();
+    if (!topic) return res.status(400).json({ ok: false, error: 'no active topic' });
+
+    const ip  = (req.headers['x-forwarded-for'] || '').split(',')[0] || req.socket?.remoteAddress || '';
+    const ua  = req.headers['user-agent'] || '';
+    const ref = req.headers['referer'] || '';
+    const ts  = NOW_TH();
+
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SHEET_ID,
+      range: 'Sheet1!A:G', // A:เวลา B:ผู้ใช้ C:หัวข้อ D:โหวต E:IP F:UA G:Ref
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [[ts, user || '', topic, vRaw, ip, ua, ref]] },
+    });
+
+    const { yes, no } = await countVotes(topic);
+    res.json({ ok: true, topic, yes, no });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
+
 
 // ลงคะแนน
 app.post('/vote', async (req, res) => {
