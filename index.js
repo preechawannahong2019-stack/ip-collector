@@ -9,7 +9,7 @@ app.use(express.urlencoded({ extended: true }));
 // ===== Config =====
 const SHEET_ID = process.env.SHEET_ID;           // ต้องตั้งใน Cloud Run
 const TZ = 'Asia/Bangkok';
-const ADMIN_PASS = process.env.ADMIN_PASS || '1+2+3+';  // คุณกำหนดตามที่ต้องการได้
+const ADMIN_PASS = process.env.ADMIN_PASS || '123';  // คุณกำหนดตามที่ต้องการได้
 
 // ===== Google Sheets client (ใช้ ADC ของ Cloud Run) =====
 const auth = new google.auth.GoogleAuth({ scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
