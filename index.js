@@ -1,108 +1,67 @@
-const express = require('express');
-const { google } = require('googleapis');
+const express = require("express");
+const { google } = require("googleapis");
+const cors = require("cors");
+
 const app = express();
-
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(cors());
 
-const SHEET_ID = process.env.SHEET_ID;
-const ADMIN_PIN = '123'; // ← เปลี่ยนรหัสแอดมินได้ที่นี่
-const TZ = 'Asia/Bangkok';
-
+const SHEET_ID = process.env.SHEET_ID; // ตั้งค่าใน Cloud Run
 const auth = new google.auth.GoogleAuth({
-  scopes: ['https://www.googleapis.com/auth/spreadsheets']
+  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
 });
-const sheets = google.sheets({ version: 'v4', auth });
+const sheets = google.sheets({ version: "v4", auth });
 
-// ===== util =====
-async function getVoteSheet() {
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: SHEET_ID,
-    range: 'Sheet1!A:F'
-  });
-  return res.data.values || [];
-}
+let currentTopic = "โหวตเรื่องใหม่กำลังรอแอดมินตั้งค่า";
 
-// ===== GET /poll : หัวข้อ + คะแนนปัจจุบัน =====
-app.get('/poll', async (req, res) => {
-  try {
-    const rows = await getVoteSheet();
-    const topic = rows[1]?.[0] || '';
-    let yes = 0, no = 0;
+app.get("/poll", (req, res) => {
+  res.json({ topic: currentTopic });
+});
 
-    for (let i = 2; i < rows.length; i++) {
-      const vote = (rows[i][1] || '').toLowerCase();
-      if (vote === 'yes') yes++;
-      else if (vote === 'no') no++;
-    }
-    res.json({ topic, yes, no });
-  } catch (e) {
-    console.error('GET /poll', e);
-    res.status(500).json({ error: 'server_error' });
+// แอดมินเปลี่ยนหัวข้อโหวต (มีรหัส)
+app.post("/topic", (req, res) => {
+  const { topic, pin } = req.body;
+  if (pin === "123") {
+    currentTopic = topic || currentTopic;
+    res.json({ message: "updated", topic: currentTopic });
+  } else {
+    res.status(403).json({ error: "invalid pin" });
   }
 });
 
-// ===== POST /topic : ตั้งหัวข้อ (เฉพาะแอดมิน) =====
-app.post('/topic', async (req, res) => {
+// โหวต
+app.post("/vote", async (req, res) => {
+  const { user, choice } = req.body;
+  const ip = req.headers["x-forwarded-for"]?.split(",")[0];
+  const ua = req.headers["user-agent"];
+  const ref = req.headers["referer"] || "";
+
+  if (!choice) return res.status(400).json({ error: "missing choice" });
+
+  const ts = new Date().toLocaleString("th-TH", { timeZone: "Asia/Bangkok" });
+
   try {
-    const { topic, pin } = req.body;
-    if (pin !== ADMIN_PIN) return res.status(403).json({ error: 'forbidden' });
-    if (!topic || topic.trim() === '') return res.status(400).json({ error: 'missing_topic' });
-
-    // ล้างชีทแล้ววางหัวตาราง + topic
-    await sheets.spreadsheets.values.clear({
-      spreadsheetId: SHEET_ID,
-      range: 'Sheet1'
-    });
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SHEET_ID,
-      range: 'Sheet1!A1:F1',
-      valueInputOption: 'RAW',
-      requestBody: { values: [['Topic','Vote','Timestamp','Provider','AccountId','Name']] }
-    });
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SHEET_ID,
-      range: 'Sheet1!A2',
-      valueInputOption: 'RAW',
-      requestBody: { values: [[topic]] }
-    });
-
-    res.json({ success: true });
-  } catch (e) {
-    console.error('POST /topic', e);
-    res.status(500).json({ error: 'server_error' });
-  }
-});
-
-// ===== POST /vote : บันทึกโหวต + ตัวตน (LINE/Facebook/anonymous) =====
-app.post('/vote', async (req, res) => {
-  try {
-    const { choice, identity } = req.body || {};
-    if (!['yes', 'no'].includes(choice)) {
-      return res.status(400).json({ error: 'invalid_vote' });
-    }
-
-    // identity format ที่คาดหวัง:
-    // { provider: 'line'|'facebook'|'anonymous', id: '...', name: '...' }
-    const provider = identity?.provider || 'anonymous';
-    const id = identity?.id || '';
-    const name = identity?.name || '';
-
-    const ts = new Date().toLocaleString('th-TH', { timeZone: TZ });
-
     await sheets.spreadsheets.values.append({
       spreadsheetId: SHEET_ID,
-      range: 'Sheet1!A:F',
-      valueInputOption: 'RAW',
-      requestBody: { values: [[null, choice, ts, provider, id, name]] }
+      range: "Sheet1!A:F",
+      valueInputOption: "USER_ENTERED",
+      requestBody: {
+        values: [[ts, user, currentTopic, choice, ip, ua, ref]],
+      },
     });
 
-    res.json({ success: true });
-  } catch (e) {
-    console.error('POST /vote', e);
-    res.status(500).json({ error: 'server_error' });
+    const result = await sheets.spreadsheets.values.get({
+      spreadsheetId: SHEET_ID,
+      range: "Sheet1!A:F",
+    });
+    const values = result.data.values || [];
+    const yes = values.filter(r => r[3] === "yes").length;
+    const no = values.filter(r => r[3] === "no").length;
+
+    res.json({ success: true, yes, no });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log(`✅ Server on ${PORT}`));
+app.listen(8080, () => console.log("Server running on port 8080"));
